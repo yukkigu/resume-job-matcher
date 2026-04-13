@@ -20,10 +20,10 @@ except LookupError:
 
 # Load spaCy model
 try:
-    nlp = spacy.load('en_core_web_sm')
+    nlp_spacy = spacy.load('en_core_web_sm')
 except OSError:
     print("Warning: spaCy model not found. Run: python -m spacy download en_core_web_sm")
-    nlp = None
+    nlp_spacy = None
 
 # Define a class for text preprocessing
 class PreprocessText:
@@ -35,7 +35,7 @@ class PreprocessText:
     def __init__(self, remove_stopwords: bool = False):
         self.remove_stopwords = remove_stopwords
         self.stop_words = set(stopwords.words('english')) if remove_stopwords else set()
-        self.nlp = nlp
+        self.nlp_spacy = nlp_spacy
     
     # Clean text by removing URLs, emails, special characters, and normalizing whitespace
     def clean_text(self, text: str) -> str:
@@ -114,12 +114,12 @@ class PreprocessText:
         text = self.clean_text(text)
 
         # if spaCy model is not available, use tokenization without lemmatization
-        if self.nlp is None:
+        if self.nlp_spacy is None:
             return self.tokenize(text)
 
         IMPORTANT_SHORT_TOKENS = {"ai", "ml", "r", "c", "c++"}
 
-        doc = self.nlp(text)
+        doc = self.nlp_spacy(text)
         tokens = []
 
         for token in doc:
