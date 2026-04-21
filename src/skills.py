@@ -80,20 +80,59 @@ class SkillVocabularyBuilder:
         """Filter out noisy non-skill phrases from raw job skill text."""
         if not skill:
             return False
+
+        skill = skill.strip().lower()
+
+        if len(skill) < 2:
+            return False
         if len(skill) > 80:
             return False
 
+        # reject single generic tokens
+        bad_exact = {
+            "a", "an", "the", "be", "to", "of", "in", "on", "at", "by", "or", "and",
+            "work", "working", "skills", "skill", "experience", "knowledge",
+            "ability", "abilities", "general", "review", "process", "processes",
+            "office", "support", "reports", "reporting", "documentation",
+            "education", "professional", "environment", "service", "services"
+        }
+        if skill in bad_exact:
+            return False
+
+        # reject benefits/perks/company offerings
+        bad_substrings = (
+            "401k", "401(k)", "salary", "competitive salary", "bonus", "bonuses",
+            "benefits", "medical", "dental", "vision", "pto", "paid time off",
+            "life insurance", "tuition reimbursement", "retirement", "holiday",
+            "holidays", "wellness", "flexible schedule", "remote work", "hybrid",
+            "commission", "equity", "stock option", "stock options",
+        )
+        if any(term in skill for term in bad_substrings):
+            return False
+
+        # reject requirement boilerplate / sentence fragments
         bad_prefixes = (
             "ability to ",
             "experience in ",
+            "experience with ",
             "minimum ",
             "must be ",
             "required ",
             "strong ",
             "knowledge of ",
+            "proficient in ",
+            "familiar with ",
+            "responsible for ",
         )
         if skill.startswith(bad_prefixes):
             return False
+
+        # reject mostly non-informative alphabetic short words unless known tech skill
+        allow_short = {"c", "c#", "c++", "r", "go", "sql", "aws", "gcp", "api", "etl", "bi", "saas"}
+        if skill not in allow_short:
+            parts = skill.split()
+            if len(parts) == 1 and len(skill) <= 3 and skill.isalpha():
+                return False
 
         return True
 
