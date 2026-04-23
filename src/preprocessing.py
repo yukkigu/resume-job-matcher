@@ -1,3 +1,9 @@
+"""Preprocessing utilities for text data, including cleaning, tokenization, and lemmatization.
+
+This module provides a PreprocessText class that can be used to clean and normalize text data,
+as well as quick helper functions for common preprocessing tasks.
+"""
+
 # Text preprocessing and normalization utilities
 
 import re
