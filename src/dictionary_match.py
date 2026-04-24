@@ -181,16 +181,11 @@ def compute_dictionary_pairs_and_topk(
     job_df: pd.DataFrame,
     resume_skill_col: str = "extracted_skills_ranked",
     job_skill_col: str = "extracted_skills_ranked",
-    top_k: int = 20,
-    dictionary_weight: float = 0.7,
-    title_weight: float = 0.3,
+    top_k: int = 5,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     Compute all resume-job pair scores and Top-K jobs per resume.
 
-    final_score combines:
-    - dictionary_score (normalized to 0-1)
-    - title_similarity (0-1)
     """
     for col_name, df_name, df in (
         (resume_skill_col, "resume_df", resume_df),
@@ -199,15 +194,6 @@ def compute_dictionary_pairs_and_topk(
         if col_name not in df.columns:
             raise KeyError(f"Column '{col_name}' not found in {df_name}")
 
-    if dictionary_weight < 0 or title_weight < 0:
-        raise ValueError("Weights must be non-negative")
-
-    total_weight = dictionary_weight + title_weight
-    if total_weight == 0:
-        raise ValueError("At least one weight must be > 0")
-
-    dictionary_weight = dictionary_weight / total_weight
-    title_weight = title_weight / total_weight
 
     job_rows: List[Dict[str, Any]] = []
     for _, jr in job_df.iterrows():
@@ -233,13 +219,6 @@ def compute_dictionary_pairs_and_topk(
         scored_rows: List[Dict[str, Any]] = []
         for j in job_rows:
             comp = dictionary_compare(resume_skills, j["job_skills"])
-            title_similarity = compute_title_similarity(resume_category, j["job_title"])
-
-            dictionary_score_norm = comp["dictionary_score"] / 100.0
-            final_score = (
-                dictionary_weight * dictionary_score_norm
-                + title_weight * title_similarity
-            )
 
             row = {
                 "resume_id": resume_id,
@@ -255,10 +234,6 @@ def compute_dictionary_pairs_and_topk(
                 "dictionary_score": comp["dictionary_score"],
                 "job_coverage": comp["job_coverage"],
                 "skill_jaccard": comp["skill_jaccard"],
-                "title_similarity": round(title_similarity, 4),
-
-                # final combined score
-                "final_score": round(final_score * 100, 2),
 
                 # skill breakdown
                 "matched_skills": comp["matched_skills"],
@@ -269,7 +244,7 @@ def compute_dictionary_pairs_and_topk(
             pair_rows.append(row)
             scored_rows.append(row)
 
-        best = heapq.nlargest(top_k, scored_rows, key=lambda x: x["final_score"])
+        best = heapq.nlargest(top_k, scored_rows, key=lambda x: x["dictionary_score"])
         for rank, entry in enumerate(best, start=1):
             out = entry.copy()
             out["rank"] = rank
