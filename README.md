@@ -34,6 +34,27 @@ This project builds an NLP-based system that analyzes the fit between resumes an
 
 - GUI: Streamlit
 
+### Python environment (recommended)
+
+Create a local virtualenv and install dependencies:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+```
+
+If you use VS Code/Jupyter, select the `.venv` interpreter as your notebook kernel. If you see `ModuleNotFoundError: No module named 'pandas'`, it usually means the notebook is running on a different Python interpreter than the one where dependencies were installed.
+
+## Run the Resume → Job Recommender (Streamlit)
+
+Paste resume text (no file upload) and get Top-K job recommendations from the processed jobs dataset:
+
+```bash
+python3 -m pip install -r requirements.txt
+streamlit run recommender_app.py
+```
+
 ## Methodology
 
 1. Text preprocessing (cleaning, normalization)
