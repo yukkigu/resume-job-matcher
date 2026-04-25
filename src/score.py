@@ -104,8 +104,8 @@ def compute_ranks_and_topk(
     score_col: str = "final_score",
     resume_id_col: str = "resume_id",
     top_k: int = 5,
-    output_ranked_path: str | None = "../data/processed/final_ranked.csv",
-    output_topk_path: str | None = "../data/processed/final_topk.csv",
+    output_ranked_path: str | None = "../data/scores/final_ranked.csv",
+    output_topk_path: str | None = "../data/scores/final_topk.csv",
 ):
     """
     Compute per-resume ranks and Top-K rows.
