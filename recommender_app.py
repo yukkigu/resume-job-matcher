@@ -13,9 +13,13 @@ SRC_PATH = (Path(__file__).parent / "src").resolve()
 if str(SRC_PATH) not in sys.path:
     sys.path.insert(0, str(SRC_PATH))
 
-from matching import dictionary_compare
+import json
+
+from dictionary_match import dictionary_compare, to_skill_list
 from sentiment_analysis import ResumeJobMatcher
 from skills import DEFAULT_SYNONYM_MAP, SkillVocabularyBuilder
+from skills_extraction import SkillExtractor
+from title_similarity import compute_title_similarity, compute_title_similarity_df, save_title_similarity_csv
 
 
 st.set_page_config(page_title="Resume → Job Recommender", layout="wide")
@@ -27,7 +31,6 @@ class JobIndex:
     titles: List[str]
     companies: List[str]
     job_clean_texts: List[str]
-    job_skill_strings: List[str]
     job_skill_sets: List[Set[str]]
     job_keyword_sets: List[Set[str]]
     job_required_labels: List[Set[str]]
@@ -144,12 +147,32 @@ def load_jobs_and_vocab(min_frequency: int = 3) -> JobIndex:
     titles: List[str] = []
     companies: List[str] = []
     job_clean_texts: List[str] = []
-    job_skill_strings: List[str] = []
     job_skill_sets: List[Set[str]] = []
     job_keyword_sets: List[Set[str]] = []
     job_requireds: List[Set[str]] = []
 
+    extracted_path = (Path(__file__).parent / "data" / "processed" / "job_skills_extracted.csv").resolve()
+    extractor = SkillExtractor(vocabulary=vocab, synonym_map=DEFAULT_SYNONYM_MAP, min_vocab_frequency=1)
+
+    if extracted_path.exists():
+        extracted_df = pd.read_csv(extracted_path).fillna("")
+        if "job_index" not in extracted_df.columns or "extracted_skills" not in extracted_df.columns:
+            raise KeyError(
+                f"Expected columns ['job_index','extracted_skills'] in {extracted_path.name}, "
+                f"got {extracted_df.columns.tolist()}"
+            )
+        extracted_skills_by_index: Dict[int, List[str]] = {}
+        for _, row in extracted_df.iterrows():
+            try:
+                jidx = int(row.get("job_index"))
+            except Exception:
+                continue
+            extracted_skills_by_index[jidx] = to_skill_list(row.get("extracted_skills", ""))
+    else:
+        extracted_skills_by_index = {}
+
     for _, row in jobs_df.fillna("").iterrows():
+        job_index = int(row.name)
         titles.append(str(row.get("job_title", "")))
         companies.append(str(row.get("company", "")))
         combined = str(row.get("job_combined_text", "")) or " ".join(
@@ -163,19 +186,32 @@ def load_jobs_and_vocab(min_frequency: int = 3) -> JobIndex:
         clean = ResumeJobMatcher.clean_text(combined)
         job_clean_texts.append(clean)
 
-        skills_str = str(row.get("job_skills_cleaned", ""))
-        job_skill_strings.append(skills_str)
-        extracted = _extract_skills_from_text(builder, skills_str, vocab_set)
-        job_skill_sets.append(set(extracted))
+        # Prefer extracted skills from job_skills_extracted.csv; otherwise compute and save later.
+        extracted_skills = extracted_skills_by_index.get(job_index)
+        if extracted_skills is None:
+            extracted_skills = extractor.extract_from_text(str(row.get("job_skills_cleaned", "")))
+            extracted_skills_by_index[job_index] = extracted_skills
+        job_skill_sets.append(set(extracted_skills))
 
         job_keyword_sets.append(_extract_keyword_set(clean, top_k=25))
         job_requireds.append(_job_required_labels(clean))
+
+    if not extracted_path.exists():
+        extracted_path.parent.mkdir(parents=True, exist_ok=True)
+        out_rows = []
+        for jidx, skills in extracted_skills_by_index.items():
+            out_rows.append(
+                {
+                    "job_index": int(jidx),
+                    "extracted_skills": json.dumps(list(skills)),
+                }
+            )
+        pd.DataFrame(out_rows).sort_values("job_index").to_csv(extracted_path, index=False)
 
     return JobIndex(
         titles=titles,
         companies=companies,
         job_clean_texts=job_clean_texts,
-        job_skill_strings=job_skill_strings,
         job_skill_sets=job_skill_sets,
         job_keyword_sets=job_keyword_sets,
         job_required_labels=job_requireds,
@@ -210,6 +246,8 @@ def _rank_with_composite(
     index: JobIndex,
     model_name: str,
     top_k: int,
+    resume_title: str,
+    title_weight: float,
     candidate_pool: int = 250,
 ) -> pd.DataFrame:
     resume_clean = ResumeJobMatcher.clean_text(resume_text)
@@ -240,7 +278,8 @@ def _rank_with_composite(
     candidate_idx = np.argsort(semantic_scores)[::-1][:pool]
 
     matcher = ResumeJobMatcher(vocabulary=index.vocab_keys, model_name=model_name)
-    resume_skills = matcher.extract_skills(resume_text)
+    extractor = SkillExtractor(vocabulary={k: 1 for k in index.vocab_keys}, synonym_map=DEFAULT_SYNONYM_MAP)
+    resume_skills = set(extractor.extract_from_text(resume_text))
     resume_keywords = _extract_keyword_set(resume_clean, top_k=25)
 
     resume_has_label: Dict[str, bool] = {}
@@ -272,17 +311,22 @@ def _rank_with_composite(
             + matcher.weights["keyword_relevance"] * keyword_score
             + matcher.weights["qualification_match"] * qualification_score
         )
+        title_sim = compute_title_similarity(resume_title, index.titles[int(idx)]) if resume_title else 0.0
+        overall_with_title = (1.0 - title_weight) * overall + title_weight * title_sim
 
         rows.append(
             {
                 "job_index": int(idx),
                 "title": index.titles[int(idx)],
                 "company": index.companies[int(idx)],
-                "overall_score": round(float(overall) * 100.0, 2),
+                "overall_score": round(float(overall_with_title) * 100.0, 2),
                 "semantic_similarity": round(float(semantic), 4),
                 "skill_overlap_score": round(float(overlap), 4),
                 "keyword_relevance": round(float(keyword_score), 4),
                 "qualification_match": round(float(qualification_score), 4),
+                "title_similarity": round(float(title_sim), 4),
+                "matched_skills_preview": ", ".join(sorted(list(resume_skills & job_skills))[:10]),
+                "missing_skills_preview": ", ".join(sorted(list(job_skills - resume_skills))[:10]),
                 "missing_qualifications": ", ".join(missing_quals[:10]),
             }
         )
@@ -299,14 +343,15 @@ def _rank_with_skills_tfidf_hybrid(
     top_k: int,
     dict_weight: float,
     tfidf_weight: float,
+    resume_title: str,
+    title_weight: float,
 ) -> pd.DataFrame:
     resume_clean = ResumeJobMatcher.clean_text(resume_text)
     if not resume_clean:
         return pd.DataFrame()
 
-    builder = SkillVocabularyBuilder(synonym_map=DEFAULT_SYNONYM_MAP)
-    vocab_set = set(index.vocab_keys) | set(builder.synonym_map.values())
-    resume_skills = _extract_skills_from_text(builder, resume_text, vocab_set)
+    extractor = SkillExtractor(vocabulary={k: 1 for k in index.vocab_keys}, synonym_map=DEFAULT_SYNONYM_MAP)
+    resume_skills = extractor.extract_from_text(resume_text)
 
     from sklearn.feature_extraction.text import TfidfVectorizer
     from sklearn.metrics.pairwise import cosine_similarity
@@ -317,18 +362,22 @@ def _rank_with_skills_tfidf_hybrid(
 
     rows: List[Dict[str, object]] = []
     for job_index in range(len(index.job_clean_texts)):
-        dict_result = dictionary_compare(resume_skills, index.job_skill_strings[job_index])
+        job_skills = sorted(list(index.job_skill_sets[job_index]))
+        dict_result = dictionary_compare(resume_skills, job_skills)
         dict_score = float(dict_result["dictionary_score"]) / 100.0
         tfidf_sim = float(tfidf_scores[job_index])
         hybrid = (dict_weight * dict_score) + (tfidf_weight * tfidf_sim)
+        title_sim = compute_title_similarity(resume_title, index.titles[job_index]) if resume_title else 0.0
+        hybrid_with_title = (1.0 - title_weight) * hybrid + title_weight * title_sim
         rows.append(
             {
                 "job_index": int(job_index),
                 "title": index.titles[job_index],
                 "company": index.companies[job_index],
-                "hybrid_score": round(float(hybrid), 6),
+                "hybrid_score": round(float(hybrid_with_title), 6),
                 "dictionary_score": round(float(dict_score) * 100.0, 2),
                 "tfidf_similarity": round(float(tfidf_sim), 6),
+                "title_similarity": round(float(title_sim), 4),
                 "matched_skills_preview": ", ".join(dict_result.get("matched_skills", [])[:10]),
                 "missing_skills_preview": ", ".join(dict_result.get("missing_skills", [])[:10]),
             }
@@ -342,11 +391,14 @@ with st.sidebar:
     st.header("Settings")
     top_k = st.slider("Top K jobs", min_value=1, max_value=20, value=5, step=1)
     min_freq = st.slider("Skill vocab min frequency", min_value=1, max_value=25, value=3, step=1)
+    resume_title = st.text_input("Resume title / target role (optional)", value="")
+    title_weight = st.slider("Title similarity weight", 0.0, 0.5, 0.15, 0.05)
     method = st.selectbox(
         "Method",
         [
             "MPNet (composite scoring)",
             "MiniLM (composite scoring)",
+            "BGE-small (composite scoring)",
             "Skills + TF-IDF (hybrid)",
         ],
     )
@@ -390,6 +442,8 @@ if run:
                     index=index,
                     model_name="sentence-transformers/all-mpnet-base-v2",
                     top_k=top_k,
+                    resume_title=resume_title,
+                    title_weight=title_weight,
                     candidate_pool=candidate_pool,
                 )
                 backend = df.attrs.get("semantic_backend", "unknown")
@@ -400,6 +454,20 @@ if run:
                     index=index,
                     model_name="sentence-transformers/all-MiniLM-L6-v2",
                     top_k=top_k,
+                    resume_title=resume_title,
+                    title_weight=title_weight,
+                    candidate_pool=candidate_pool,
+                )
+                backend = df.attrs.get("semantic_backend", "unknown")
+                st.caption(f"Semantic backend: `{backend}`")
+            elif method == "BGE-small (composite scoring)":
+                df = _rank_with_composite(
+                    resume_text=resume_text,
+                    index=index,
+                    model_name="BAAI/bge-small-en-v1.5",
+                    top_k=top_k,
+                    resume_title=resume_title,
+                    title_weight=title_weight,
                     candidate_pool=candidate_pool,
                 )
                 backend = df.attrs.get("semantic_backend", "unknown")
@@ -411,6 +479,8 @@ if run:
                     top_k=top_k,
                     dict_weight=dict_weight,
                     tfidf_weight=tfidf_weight,
+                    resume_title=resume_title,
+                    title_weight=title_weight,
                 )
         except ModuleNotFoundError as exc:
             if "torchvision" in str(exc):
@@ -426,6 +496,8 @@ if run:
                     top_k=top_k,
                     dict_weight=0.6,
                     tfidf_weight=0.4,
+                    resume_title=resume_title,
+                    title_weight=title_weight,
                 )
             else:
                 raise
@@ -436,6 +508,22 @@ if run:
 
     st.subheader("Top recommendations")
     st.dataframe(df, use_container_width=True, hide_index=True)
+
+    if resume_title.strip():
+        # Save title similarity for all jobs as a CSV, and offer download.
+        jobs_df, _ = ResumeJobMatcher.load_processed_data()
+        ts_df = compute_title_similarity_df(resume_title.strip(), jobs_df, job_title_col="job_title")
+        out_path = save_title_similarity_csv(ts_df, Path("outputs") / "title_similarity_scores.csv")
+
+        with st.expander("Title similarity (CSV)"):
+            st.caption(f"Saved to `{out_path}`")
+            st.dataframe(ts_df.head(20), use_container_width=True, hide_index=True)
+            st.download_button(
+                "Download title similarity CSV",
+                data=out_path.read_bytes(),
+                file_name=out_path.name,
+                mime="text/csv",
+            )
 
     with st.expander("Show raw resume preview"):
         cleaned = ResumeJobMatcher.clean_text(resume_text)

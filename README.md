@@ -55,6 +55,10 @@ python3 -m pip install -r requirements.txt
 streamlit run recommender_app.py
 ```
 
+Notes:
+- First run may create `data/processed/job_skills_extracted.csv` for faster, consistent dictionary-style skill matching.
+- If you provide a “Resume title / target role”, the app also writes `outputs/title_similarity_scores.csv`.
+
 ## Methodology
 
 1. Text preprocessing (cleaning, normalization)
