@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
-from skills import SkillVocabularyBuilder, DEFAULT_SYNONYM_MAP
+from src.skills import SkillVocabularyBuilder, DEFAULT_SYNONYM_MAP
 
 
 class SkillExtractor:
