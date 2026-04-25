@@ -84,7 +84,7 @@ def compute_final_scores(
         how="inner",
         suffixes=("_skill", "_model"),
     ).merge(
-        title_pairs_df[["resume_id", "job_idx", "title_similarity", "model_name"]],
+        title_pairs_df[["resume_id", "job_idx", "title_similarity"]],
         on=["resume_id", "job_idx"],
         how="inner",
     )
