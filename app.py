@@ -140,8 +140,8 @@ with st.sidebar:
         method = "tfidf"
 
     title_weight = st.slider("Title weight", 0.0, 0.5, 0.2)
-    model_weight = st.slider("Model weight", 0.0, 0.5, 0.4)
-    dictionary_weight = st.slider("Dictionary weight", 0.0, 0.5, 0.4)
+    model_weight = st.slider("Model weight", 0.0, 0.5, 0.5)
+    dictionary_weight = st.slider("Dictionary weight", 0.0, 0.5, 0.3)
 
 # =====================
 # Main area
