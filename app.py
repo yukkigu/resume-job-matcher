@@ -62,6 +62,7 @@ def build_improvement_report(topk: pd.DataFrame, resume_title: str, weights: dic
     )
     lines.append("")
 
+    any_missing = False
     for _, row in topk.iterrows():
         rank = int(row.get("rank", 0))
         job_title = str(row.get("job_title", ""))
@@ -73,6 +74,8 @@ def build_improvement_report(topk: pd.DataFrame, resume_title: str, weights: dic
 
         missing_skills = _skill_list(row.get("missing_skills", []))
         missing_top = missing_skills[:12]
+        if missing_skills:
+            any_missing = True
 
         lines.append(f"## Rank {rank}: {job_title} — {company}")
         lines.append("")
@@ -99,9 +102,14 @@ def build_improvement_report(topk: pd.DataFrame, resume_title: str, weights: dic
             lines.append("- Add a short “Relevant Projects” section if applicable.")
         else:
             lines.append(f"- Prioritize learning or demonstrating: {', '.join(missing_top[:6])}.")
-            lines.append("- Add 1–2 resume bullets per missing skill showing evidence (project/work/academic).")
-            lines.append("- Build one small portfolio project using 2–3 of the missing skills together.")
-            lines.append("- For interviews: prepare a STAR story for each top missing skill.")
+        lines.append("")
+
+    if any_missing:
+        lines.append("## General next steps (apply to all roles)")
+        lines.append("")
+        lines.append("- Add 1–2 resume bullets per missing skill showing evidence (project/work/academic).")
+        lines.append("- Build one small portfolio project using 2–3 of the missing skills together.")
+        lines.append("- For interviews: prepare a STAR story for each top missing skill.")
         lines.append("")
 
     return "\n".join(lines).strip() + "\n"
