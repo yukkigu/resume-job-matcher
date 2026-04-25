@@ -1,19 +1,11 @@
 import streamlit as st
 import pdfplumber
-import sys
-
+import pandas as pd
+from src.score import compute_fused_pairs_and_topk, compute_final_scores, compute_ranks_and_topk
 from src.preprocessing import PreprocessText
-from src.skills import SkillVocabularyBuilder, DEFAULT_SYNONYM_MAP
+from src.skills_extraction import SkillExtractor
+from src.skills import DEFAULT_SYNONYM_MAP
 
-# -------------------------
-# Page config
-# -------------------------
-st.set_page_config(page_title="Resume Job Matcher", layout="wide")
-st.title("Resume Job Matcher")
-
-# -------------------------
-# Utils
-# -------------------------
 def parse_pdf(file):
     text = ""
     try:
@@ -24,125 +16,128 @@ def parse_pdf(file):
         st.error(f"PDF parsing failed: {e}")
     return text
 
+def resume_to_df(text: str) -> pd.DataFrame:
+    return pd.DataFrame([{
+        "ID": 0,
+        "resume_cleaned": text
+    }])
 
-def load_text(file):
-    if file.type == "application/pdf":
-        return parse_pdf(file)
-    else:
-        return file.read().decode("utf-8", errors="ignore")
+# =====================
+# Page config
+# =====================
+st.set_page_config(page_title="Resume → Job Recommender", layout="wide")
+st.title("Resume → Job Recommender")
 
+# =====================
+# Sidebar
+# =====================
+with st.sidebar:
+    st.header("Settings")
 
-# -------------------------
-# Init pipeline
-# -------------------------
-pre = PreprocessText(remove_stopwords=False)
-extractor = SkillVocabularyBuilder(DEFAULT_SYNONYM_MAP)
+    top_k = st.slider("Top K jobs", 1, 20, 5)
 
-# -------------------------
-# Sidebar (job input)
-# -------------------------
-st.sidebar.header("Job Input")
-st.markdown(
-    """
-    <style>
-        section[data-testid="stSidebar"] {
-            width: 500px !important; # Set the width to your desired value
-        }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-job_input_mode = st.sidebar.radio(
-    "Choose job input type",
-    ["Paste Job Description", "Use Example"]
-)
-
-if job_input_mode == "Paste Job Description":
-    job_text = st.sidebar.text_area(
-        "Paste job description here",
-        height=200, 
-        width=800
+    method = st.selectbox(
+        "Model",
+        [
+            "BGE-small (composite scoring)", 
+            "MiniLM (composite scoring)", 
+            "MPNet (composite scoring)",
+            "Skills + TF-IDF (hybrid)"
+        ]
     )
-else:
-    job_text = "Looking for a machine learning engineer with Python, AWS, and Docker experience."
 
-# -------------------------
-# Main input (resume)
-# -------------------------
-uploaded_file = st.file_uploader(
-    "Upload Resume (PDF or TXT)",
-    type=["pdf", "txt"]
-)
+    if method == "BGE-small (composite scoring)":
+        method = "BAAI/bge-small-en-v1.5"
+    elif method == "MiniLM (composite scoring)":
+        method = "sentence-transformers/all-MiniLM-L6-v2"
+    elif method == "MPNet (composite scoring)":
+        method = "sentence-transformers/all-mpnet-base-v2"
+    elif method == "Skills + TF-IDF (hybrid)":
+        method = "tfidf"
 
-# -------------------------
-# Run pipeline
-# -------------------------
+    title_weight = st.slider("Title weight", 0.0, 0.5, 0.2)
+    model_weight = st.slider("Model weight", 0.0, 0.5, 0.4)
+    dictionary_weight = st.slider("Dictionary weight", 0.0, 0.5, 0.4)
+
+# =====================
+# Main area
+# =====================
+st.title("PDF Parser")
+
+uploaded_file = st.file_uploader("Upload PDF", type=["pdf"])
+resume_text = ""
 if uploaded_file:
+    resume_text = parse_pdf(uploaded_file)
 
-    # ---------- Load ----------
-    raw_text = load_text(uploaded_file)
+    if not resume_text.strip():
+        st.warning("No text extracted.")
 
-    if not raw_text.strip():
-        st.warning("No text extracted from file.")
+# =====================
+# Button
+# =====================
+col1, col2 = st.columns([1, 4])
+
+with col1:
+    run = st.button("Get Recommendations", type="primary")
+
+# =====================
+# Output area
+# =====================
+if run:
+    if not resume_text.strip():
+        st.warning("Please upload a PDF file.")
         st.stop()
+    
+    with st.spinner("Computing recommendations..."):
+        try:
+            pre = PreprocessText(remove_stopwords=False)
+            
+            # --- resume cleaning ---
+            clean_resume = pre.clean_text(resume_text)
+            resume_df = resume_to_df(clean_resume)
 
-    # ---------- Preprocess ----------
-    clean_text = pre.clean_text(raw_text)
+            # --- skill extraction for resume ---
+            skill_extractor = SkillExtractor.from_vocabulary_json(
+                vocab_path="./data/processed/skill_vocabulary.json",
+                synonym_map=DEFAULT_SYNONYM_MAP,
+                min_alias_len=2,
+                min_vocab_frequency=10,
+            )
 
-    # ---------- Skill extraction ----------
-    resume_skills = extractor.extract(clean_text)
-    job_skills = extractor.extract(job_text)
+            resume_out = skill_extractor.extract_from_dataframe(
+                resume_df,
+                text_col="resume_cleaned",
+                output_col="extracted_skills_ranked",
+                max_skills_per_text=300,
+            )
 
-    # ---------- Matching ----------
-    resume_set = set()
-    job_set = set()
+            # --- load job data ---
+            processed_dir = "./data/processed"
+            job_df = f"{processed_dir}/job_skills_extracted.csv"
+            job_out = pd.read_csv(job_df)
 
-    matched = resume_set & job_set
-    missing = job_set - resume_set
 
-    score = len(matched) / (len(job_set) + 1e-5)
+            if model_weight > 1 or title_weight > 1 or dictionary_weight > 1 or model_weight < 0 or title_weight < 0 or dictionary_weight < 0:
+                st.error("Weights must be between 0 and 1.")
+                st.stop()
+            if round(model_weight + title_weight + dictionary_weight, 5) != 1.0:
+                st.error("Weights must sum to 1.")
+                st.stop()
 
-    # -------------------------
-    # UI Display
-    # -------------------------
+            # --- compute scores and top-k ---
+            pairs, topk = compute_fused_pairs_and_topk(
+                resume_df=resume_out,
+                job_df=job_out,
+                top_k=top_k,
+                model_name=method,
+                skill_weight=dictionary_weight,
+                model_weight=model_weight,
+                title_weight=title_weight,
+            )
 
-    # Score
-    st.subheader("Match Score")
-    st.progress(min(score, 1.0))
-    st.write(f"{score:.2f}")
+            st.subheader("Top recommendations")
+            st.dataframe(topk, use_container_width=True, hide_index=True)
 
-    # Columns
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.subheader("Matched Skills")
-        if matched:
-            st.write(list(matched))
-        else:
-            st.write("None")
-
-    with col2:
-        st.subheader("Missing Skills")
-        if missing:
-            st.write(list(missing))
-        else:
-            st.write("None")
-
-    # Recommendation
-    st.subheader("Recommendations")
-    if missing:
-        st.write("You may consider learning:")
-        st.write(list(missing))
-    else:
-        st.write("Good match. No major skill gaps.")
-
-    # Debug section
-    with st.expander("Debug Info"):
-        st.subheader("Extracted Resume Skills")
-        # st.write(resume_skills)
-
-        st.subheader("Extracted Job Skills")
-        # st.write(job_skills)
-
-        st.subheader("Parsed Resume Text (first 1000 chars)")
-        st.text(raw_text[:1000])
+        except Exception as e:
+            st.error(f"Error during recommendation: {e}")
+            st.stop()

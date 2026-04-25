@@ -1,6 +1,6 @@
 import pandas as pd
-from dictionary_match import compute_dictionary_pairs_and_topk, compute_title_similarity
-from embedder import compute_text_pairs_and_topk
+from src.dictionary_match import compute_dictionary_pairs_and_topk, compute_title_similarity
+from src.embedder import compute_text_pairs_and_topk
 
 def compute_fused_pairs_and_topk(
     resume_df: pd.DataFrame,
@@ -11,6 +11,9 @@ def compute_fused_pairs_and_topk(
     job_desc_col: str = "job_summary",
     top_k: int = 5,
     model_name: str = "BAAI/bge-small-en-v1.5",
+    skill_weight: float = 0.4,
+    model_weight: float = 0.4,
+    title_weight: float = 0.2,
 ):
     dict_pairs, _ = compute_dictionary_pairs_and_topk(
         resume_df=resume_df,
@@ -42,9 +45,9 @@ def compute_fused_pairs_and_topk(
     )
 
     fused["final_score"] = (
-        0.4 * (fused["dictionary_score"] / 100.0)
-        + 0.4 * fused["semantic_similarity"]
-        + 0.2 * fused["title_similarity"]
+        skill_weight * (fused["dictionary_score"] / 100.0)
+        + model_weight * fused["semantic_similarity"]
+        + title_weight * fused["title_similarity"]
     ) * 100.0
 
     fused = fused.sort_values(["resume_id", "final_score"], ascending=[True, False])
