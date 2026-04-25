@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import re
+import heapq
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import pandas as pd
 
@@ -127,3 +128,78 @@ def save_title_similarity_csv(df: pd.DataFrame, output_path: str | Path) -> Path
     df.to_csv(out, index=False)
     return out
 
+def compute_title_pairs_and_topk(
+    resume_df: pd.DataFrame,
+    job_df: pd.DataFrame,
+    resume_title_col: str = "Category",
+    job_title_col: str = "job_title",
+    top_k: int = 5,
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Compute title similarity for all resume-job pairs and return:
+    - pair_df: all pairwise title similarity scores
+    - topk_df: top-k jobs per resume ranked by title similarity
+
+    Args:
+        resume_df: DataFrame containing resumes
+        job_df: DataFrame containing jobs
+        resume_title_col: column in resume_df used as resume-side title/category
+        job_title_col: column in job_df containing job titles
+        top_k: number of top jobs to keep per resume
+
+    Returns:
+        pair_df, topk_df
+    """
+    if resume_title_col not in resume_df.columns:
+        raise KeyError(f"Column '{resume_title_col}' not found in resume_df")
+    if job_title_col not in job_df.columns:
+        raise KeyError(f"Column '{job_title_col}' not found in job_df")
+
+    job_rows: List[Dict[str, Any]] = []
+    pair_rows: List[Dict[str, Any]] = []
+    topk_rows: List[Dict[str, Any]] = []
+
+    # Pre-store job metadata
+    for _, jr in job_df.iterrows():
+        job_rows.append({
+            "job_idx": int(jr.name),
+            "job_title": jr.get(job_title_col, ""),
+            "company": jr.get("company", ""),
+            "job_location": jr.get("job_location", ""),
+            "job_link": jr.get("job_link", ""),
+        })
+
+    # Compare every resume against every job
+    for _, rr in resume_df.iterrows():
+        resume_id = rr.get("ID", rr.name)
+        resume_idx = int(rr.name)
+        resume_title = rr.get(resume_title_col, "")
+
+        scored_rows: List[Dict[str, Any]] = []
+
+        for j in job_rows:
+            sim = compute_title_similarity(resume_title, j["job_title"])
+
+            row = {
+                "resume_id": resume_id,
+                "resume_idx": resume_idx,
+                "resume_title": resume_title,
+                "job_idx": j["job_idx"],
+                "job_title": j["job_title"],
+                "company": j["company"],
+                "job_location": j["job_location"],
+                "job_link": j["job_link"],
+                "title_similarity": round(sim, 4),
+                "final_score": round(sim * 100, 2),
+            }
+
+            pair_rows.append(row)
+            scored_rows.append(row)
+
+        best = heapq.nlargest(top_k, scored_rows, key=lambda x: x["title_similarity"])
+        for rank, entry in enumerate(best, start=1):
+            out = entry.copy()
+            out["rank"] = rank
+            topk_rows.append(out)
+
+    return pd.DataFrame(pair_rows), pd.DataFrame(topk_rows)
