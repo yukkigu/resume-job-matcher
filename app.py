@@ -233,6 +233,7 @@ if run:
                 title_weight=title_weight,
             )
 
+            topk.drop(columns=["resume_id", "resume_idx", "resume_category"], inplace=True, errors="ignore")
             st.subheader("Top recommendations (original output)")
             st.dataframe(topk, use_container_width=True, hide_index=True)
 

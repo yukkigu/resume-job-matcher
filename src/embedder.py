@@ -24,7 +24,7 @@ class TextEmbedder:
 def compute_text_pairs_and_topk(
     resume_df: pd.DataFrame,
     job_df: pd.DataFrame,
-    resume_text_col: str = "Resume_cleaned",
+    resume_text_col: str = "resume_cleaned",
     job_desc_col: str = "job_summary_cleaned",
     top_k: int = 5,
     model_name: str = "BAAI/bge-small-en-v1.5",
