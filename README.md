@@ -52,7 +52,7 @@ Paste resume text (no file upload) and get Top-K job recommendations from the pr
 
 ```bash
 python3 -m pip install -r requirements.txt
-streamlit run recommender_app.py
+streamlit run app.py
 ```
 
 Notes:
