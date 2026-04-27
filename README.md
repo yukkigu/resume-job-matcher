@@ -64,24 +64,51 @@ Notes:
 1. Text preprocessing (cleaning, normalization)
 2. Skill extraction using dictionary-based and NLP methods
 3. Skill normalization and synonym mapping
-   Resume-job similarity computation
-4. Explainable output generation (matched skills, missing skills, recommendations)
+4. Resume-job similarity computation using transformer models
+5. Explainable output generation (matched skills, missing skills, recommendations)
+
+## Three Main Paths
+1. Skills Dictionary Path
+   * Main skill/keyword extraction path
+   * Creates structured list of skills and variations
+   * Synonym mapping and standardization across all skill extraction between resumes and jobs
+2. Embedding Model Path
+   * TF-IDF as baseline (not embedding model but works as a good baseline for comparison)
+   * Three embedding models: MiniLM, MPNet, BGE-small
+   * Analyzes contextual meaning and captures semantics that skill extraction cannot capture
+3. Title Similarity Path
+   * Quick filtering method that removes irrelevant match based on title similarity 
+   * Resume category vs job title/position
+
+Final combination: 
+* Skill dictionary + TF-IDF
+* Skill dictionary + MiniLM
+* Skill dictionary + MPNet
+* Skill dictionary + BGE-small
+
 
 ## Project Structure
 
 ```
 project/
-├── app.py
+├── app.py         // streamlit GUI
 ├── notebooks/
-│   ├── preprocessing.ipynb
-│   ├── skill_extraction.ipynb
-│   ├── matching.ipynb
-│   └── final_demo.ipynb
+│   ├── dictionary-match.ipynb      // match resumes and job using dictionary
+│   ├── plot.ipynb                  // create visualizations
+│   ├── preprocessing.ipynb         // preprocessing
+│   ├── score.ipynb                 // final fusion score
+│   ├── sentiment_analysis.ipynb    // embedding model scores
+│   ├── skill_dictionary.ipynb      // create skill dictionary
+│   └── skill_extraction.ipynb      // clean/extract skills
 ├── src/
-│   ├── preprocess.py
+│   ├── dictionary_match.py
+│   ├── embedder.py
+│   ├── preprocessing.py
+│   ├── score.py
+│   ├── sentiment_analysis.py
+│   ├── skills_extraction.py
 │   ├── skills.py
-│   ├── matching.py
-│   ├── recommend.py
+│   ├── title_similarity.py
 │   └── utils.py
 ├── data/
 │   ├── raw/
